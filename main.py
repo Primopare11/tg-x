@@ -3,6 +3,7 @@ import sys
 import json
 import time
 import unicodedata
+import subprocess
 import requests
 import config
 
@@ -16,6 +17,9 @@ FILE_OFFSET = "stato/ultimo_update.txt"
 FILE_ATTESA = "stato/in_attesa.json"
 CARTELLA_MEDIA = "mediawt"
 GIORNI_CONSERVAZIONE = 7
+LIMITE_BOT = 20 * 1000 * 1000
+LIMITE_X = 15 * 1000 * 1000
+DURATA_MAX = 140
 
 
 def leggi_offset():
@@ -69,15 +73,43 @@ def componi_testo(didascalia):
     return testo, lunghezza_x
 
 
-def scarica_video(video, nome_file):
-    info = requests.get(f"{API}/getFile", params={"file_id": video["file_id"]}, timeout=30).json()
+def scegli_versione(video):
+    candidati = [video] + video.get("qualities", [])
+    validi = [c for c in candidati if c.get("file_size") and LIMITE_BOT >= c["file_size"]]
+    if not validi:
+        return None
+    return max(validi, key=lambda c: c["file_size"])
+
+
+def scarica_video(versione, nome_file):
+    info = requests.get(f"{API}/getFile", params={"file_id": versione["file_id"]}, timeout=30).json()
     if not info.get("ok"):
         print("Errore getFile:", info.get("description"))
         return False
     url = f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{info['result']['file_path']}"
     with open(os.path.join(CARTELLA_MEDIA, nome_file), "wb") as f:
-        f.write(requests.get(url, timeout=120).content)
+        f.write(requests.get(url, timeout=300).content)
     return True
+
+
+def comprimi(percorso, durata, codec):
+    if codec in ("", "h264") and LIMITE_X >= os.path.getsize(percorso) and DURATA_MAX >= durata:
+        return
+    import imageio_ffmpeg
+    ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+    secondi = max(1, min(durata or DURATA_MAX, DURATA_MAX))
+    temporaneo = percorso + ".tmp.mp4"
+    for obiettivo in (13.5, 11.0, 8.0):
+        kbps = max(300, int(obiettivo * 8000 / secondi) - 128)
+        subprocess.run([ffmpeg, "-y", "-loglevel", "error", "-i", percorso, "-t", str(DURATA_MAX),
+                        "-vf", "scale='min(1280,iw)':-2", "-c:v", "libx264", "-preset", "veryfast",
+                        "-b:v", f"{kbps}k", "-maxrate", f"{kbps}k", "-bufsize", f"{2 * kbps}k",
+                        "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k",
+                        "-movflags", "+faststart", temporaneo], check=True)
+        if LIMITE_X >= os.path.getsize(temporaneo):
+            break
+    os.replace(temporaneo, percorso)
+    print("Video compresso:", round(os.path.getsize(percorso) / 1e6, 1), "MB")
 
 
 def pulisci_media(attesa):
@@ -110,9 +142,15 @@ def prepara():
             if lunghezza > 280:
                 print("Post", post["message_id"], "saltato: troppo lungo per X")
             else:
+                versione = scegli_versione(post["video"])
+                if versione is None:
+                    print("Post", post["message_id"], "saltato: video oltre 20 MB senza versione piu leggera")
+                    salva_offset(upd["update_id"] + 1)
+                    continue
                 nome = f"{int(time.time())}_{post['video']['file_unique_id']}.mp4"
-                if not scarica_video(post["video"], nome):
+                if not scarica_video(versione, nome):
                     break
+                comprimi(os.path.join(CARTELLA_MEDIA, nome), post["video"].get("duration", 0), versione.get("codec", ""))
                 attesa.append({"testo": testo, "file": nome})
                 print("Preparato post", post["message_id"], "->", nome)
         salva_offset(upd["update_id"] + 1)
