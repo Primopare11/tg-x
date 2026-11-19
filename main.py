@@ -61,7 +61,7 @@ def da_eliminare(riga, frasi):
 
 def componi_testo(didascalia):
     frasi = [normalizza(f) for f in config.RIGHE_DA_TOGLIERE]
-        righe = [r for r in didascalia.splitlines() if not da_eliminare(r, frasi) and not (normalizza(r).startswith("videon") and normalizza(r)[6:7].isdigit())]
+    righe = [r for r in didascalia.splitlines() if not da_eliminare(r, frasi) and not (normalizza(r).startswith("videon") and normalizza(r)[6:7].isdigit())]
     pulito = "\n".join(righe).strip()
     parti = [pulito, config.LINK_STORE, config.HASHTAG, config.MENZIONE]
     testo = "\n\n".join(p for p in parti if p)
