@@ -1,0 +1,63 @@
+name: Telegram verso Buffer
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pubblica
+  cancel-in-progress: false
+
+jobs:
+  pubblica:
+    runs-on: ubuntu-latest
+    env:
+      TELEGRAMTKN: ${{ secrets.TELEGRAMTKN }}
+      BUFFER_APY_KEY: ${{ secrets.BUFFER_APY_KEY }}
+      BUFFER_CHANNEL_ID: ${{ secrets.BUFFER_CHANNEL_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install requests
+
+      - name: Recupera i video gia salvati
+        run: |
+          mkdir -p mediawt
+          if git ls-remote --exit-code --heads origin media; then
+            git fetch --depth=1 origin media
+            git archive origin/media | tar -x -C mediawt
+          fi
+
+      - name: Leggi Telegram e scarica i video
+        run: python main.py prepara
+
+      - name: Pubblica i video
+        run: |
+          mkdir -p /tmp/pub && cp mediawt/*.mp4 /tmp/pub/ 2>/dev/null || true
+          cd /tmp/pub
+          git init -q -b media
+          git config user.name "gaiax-bot"
+          git config user.email "gaiax-bot@users.noreply.github.com"
+          git add -A
+          git commit -q --allow-empty -m "video"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" media
+          sleep 20
+
+      - name: Manda i post a Buffer
+        run: python main.py invia
+
+      - name: Salva lo stato
+        run: |
+          git config user.name "gaiax-bot"
+          git config user.email "gaiax-bot@users.noreply.github.com"
+          git add stato
+          git diff --cached --quiet || git commit -q -m "stato"
+          git push -q
