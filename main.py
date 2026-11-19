@@ -90,4 +90,71 @@ def pulisci_media(attesa):
             creato = int(nome.split("_")[0])
         except ValueError:
             continue
-        if creato
+        if limite > creato:
+            os.remove(os.path.join(CARTELLA_MEDIA, nome))
+            print("Cancellato video vecchio:", nome)
+
+
+def prepara():
+    os.makedirs("stato", exist_ok=True)
+    os.makedirs(CARTELLA_MEDIA, exist_ok=True)
+    attesa = leggi_attesa()
+    risposta = requests.get(f"{API}/getUpdates",
+                            params={"offset": leggi_offset(), "timeout": 0,
+                                    "allowed_updates": '["channel_post","message"]'},
+                            timeout=60).json()
+    for upd in risposta.get("result", []):
+        post = upd.get("channel_post") or upd.get("message")
+        if post and "video" in post:
+            testo, lunghezza = componi_testo(post.get("caption", ""))
+            if lunghezza > 280:
+                print("Post", post["message_id"], "saltato: troppo lungo per X")
+            else:
+                nome = f"{int(time.time())}_{post['video']['file_unique_id']}.mp4"
+                if not scarica_video(post["video"], nome):
+                    break
+                attesa.append({"testo": testo, "file": nome})
+                print("Preparato post", post["message_id"], "->", nome)
+        salva_offset(upd["update_id"] + 1)
+    salva_attesa(attesa)
+    pulisci_media(attesa)
+
+
+def crea_post_buffer(testo, url_video):
+    s = lambda v: json.dumps(v, ensure_ascii=False)
+    query = ("mutation { createPost(input: {"
+             f" text: {s(testo)}, channelId: {s(BUFFER_CANALE)},"
+             " schedulingType: automatic, mode: addToQueue,"
+             f" saveToDraft: {'true' if config.BOZZA else 'false'},"
+             f" assets: [{{ video: {{ url: {s(url_video)} }} }}]"
+             " }) { ... on PostActionSuccess { post { id } }"
+             " ... on MutationError { message } } }")
+    r = requests.post("https://api.buffer.com", json={"query": query},
+                      headers={"Authorization": f"Bearer {BUFFER_KEY}"}, timeout=60)
+    dati = r.json()
+    if dati.get("errors"):
+        return False, dati["errors"][0]["message"]
+    esito = dati["data"]["createPost"]
+    if "post" in esito:
+        return True, esito["post"]["id"]
+    return False, esito.get("message")
+
+
+def invia():
+    attesa = leggi_attesa()
+    rimasti = []
+    for i, voce in enumerate(attesa):
+        url = f"https://raw.githubusercontent.com/{REPO}/media/{voce['file']}"
+        ok, info = crea_post_buffer(voce["testo"], url)
+        if ok:
+            print("Mandato a Buffer, id:", info)
+        else:
+            print("Buffer ha rifiutato:", info)
+            rimasti = attesa[i:]
+            break
+    salva_attesa(rimasti)
+    print("In attesa per la prossima volta:", len(rimasti))
+
+
+if __name__ == "__main__":
+    prepara() if sys.argv[1] == "prepara" else invia()
