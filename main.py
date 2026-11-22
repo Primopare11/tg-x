@@ -92,6 +92,35 @@ def scarica_video(versione, nome_file):
     return True
 
 
+def scarica_grande(post, destinazione):
+    if not os.environ.get("TG_API_ID") or not os.environ.get("TG_API_HASH"):
+        return False
+    origine = post.get("forward_origin") or {}
+    if origine.get("type") == "channel":
+        canale = origine["chat"].get("username")
+        numero = origine["message_id"]
+    else:
+        canale = post["chat"].get("username")
+        numero = post["message_id"]
+    if not canale:
+        print("Video grande da un canale senza username: impossibile scaricarlo")
+        return False
+    from telethon.sync import TelegramClient
+    from telethon.sessions import StringSession
+    client = TelegramClient(StringSession(), int(os.environ["TG_API_ID"]), os.environ["TG_API_HASH"])
+    client.start(bot_token=TELEGRAM_TOKEN)
+    try:
+        messaggio = client.get_messages(canale, ids=numero)
+        if not messaggio or not messaggio.video:
+            print("Messaggio originale non trovato nel canale", canale)
+            return False
+        client.download_media(messaggio, file=destinazione)
+    finally:
+        client.disconnect()
+    print("Scaricato video grande:", round(os.path.getsize(destinazione) / 1e6, 1), "MB")
+    return True
+
+
 def comprimi(percorso, durata, codec):
     if codec in ("", "h264") and LIMITE_X >= os.path.getsize(percorso) and DURATA_MAX >= durata:
         return
@@ -143,14 +172,19 @@ def prepara():
                 print("Post", post["message_id"], "saltato: troppo lungo per X")
             else:
                 versione = scegli_versione(post["video"])
-                if versione is None:
-                    print("Post", post["message_id"], "saltato: video oltre 20 MB senza versione piu leggera")
-                    salva_offset(upd["update_id"] + 1)
-                    continue
                 nome = f"{int(time.time())}_{post['video']['file_unique_id']}.mp4"
-                if not scarica_video(versione, nome):
-                    break
-                comprimi(os.path.join(CARTELLA_MEDIA, nome), post["video"].get("duration", 0), versione.get("codec", ""))
+                percorso = os.path.join(CARTELLA_MEDIA, nome)
+                if versione is None:
+                    if not scarica_grande(post, percorso):
+                        print("Post", post["message_id"], "saltato: video oltre 20 MB non scaricabile")
+                        salva_offset(upd["update_id"] + 1)
+                        continue
+                    codec = "da_ricodificare"
+                else:
+                    if not scarica_video(versione, nome):
+                        break
+                    codec = versione.get("codec", "")
+                comprimi(percorso, post["video"].get("duration", 0), codec)
                 attesa.append({"testo": testo, "file": nome})
                 print("Preparato post", post["message_id"], "->", nome)
         salva_offset(upd["update_id"] + 1)
