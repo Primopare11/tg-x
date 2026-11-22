@@ -1,4 +1,4 @@
-BOZZA = True
+BOZZA = False
 
 LINK_STORE = "https://www.mistress-gaia.com/en/store/videos/new/p/1/"
 HASHTAG = "#esempio1 #esempio2"
