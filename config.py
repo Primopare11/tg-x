@@ -1,8 +1,8 @@
 BOZZA = False
 
 LINK_STORE = "https://www.mistress-gaia.com/en/store/videos/new/p/1/"
-HASHTAG = "#esempio1 #esempio2"
-MENZIONE = "@accountproprietario"
+HASHTAG = "#MistressGaia #FemDom #Videos"
+MENZIONE = "@MistressGaia"
 
 RIGHE_DA_TOGLIERE = [
     "Chiedimi il video sul mio canale privato @GaiaMiss1 e mandami lo screenshot",
